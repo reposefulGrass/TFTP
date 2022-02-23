@@ -3,10 +3,16 @@ import random
 import logging
 import threading
 import socket
+import struct
+
+
+# ====[ CONSTANTS ]====
 
 MIN_PORT_NUMBER = 1_000
 MAX_PORT_NUMBER = 65_535
 BLOCK_SIZE = 512
+
+# ====[ ENUMS ]====
 
 OPCODE_READ = 1
 OPCODE_WRITE = 2
@@ -25,27 +31,40 @@ ERROR_NO_SUCH_USER = 7
 
 
 def send_request(sock, addr, opcode, filename, mode):
+    sock.send(addr, struct.pack("H", opcode))
+    sock.send(addr, filename + b"\0")
+    sock.send(addr, mode + b"\0")
     pass
 
 
-def send_data(sock, block_num, data):
+def send_data(sock, addr, block_num, data):
+    sock.send(addr, struct.pack("H", block_num))
+    sock.send(addr, data)
     pass
 
 
-def send_ack(sock, block_num):
+def send_ack(sock, addr, block_num):
+    sock.send(addr, struct.pack("H", block_num))
     pass
 
 
-def send_error(sock, error_code, error_msg):
+def send_error(sock, addr, error_code, error_msg):
+    sock.send(addr, struct.pack("H", error_code))
+    sock.send(addr, error_msg + b"\0")
     pass
+
+
+""" Read a 2-byte number """
+def read_number(sock):
+    return struct.unpack("H", sock.recvfrom(2)[0])
 
 
 def read_string(sock):
     string = b""
-    b = sock.recv(1)
+    b = sock.recvfrom(1)[0]
     while b != 0:
         string += chr(b)
-        b = sock.recv(1)
+        b = sock.recvfrom(1)[0]
 
     return string
 
@@ -58,20 +77,20 @@ def read_request(sock):
 
 
 def read_data(sock):
-    block_number = sock.recv(2)
-    data = sock.recv(BLOCK_SIZE)
+    block_number = read_number(sock)
+    data = sock.recvfrom(BLOCK_SIZE)[0]
 
     return (block_number, data, len(data) < BLOCK_SIZE)
 
 
 def read_ack(sock):
-    block_number = sock.recv(2)
+    block_number = read_number(sock)
 
     return (block_number)
 
 
 def read_error(sock):
-    error_code = sock.recv(2)
+    error_code = read_number(sock)
     error_string = read_string(sock)
 
     return (error_code, error_string)
@@ -83,23 +102,19 @@ def log_error(sock):
 
 class TFTPServer:
     def __init__(self):
-        self.source_ip = '127.0.0.1'
-        self.destination_ip = None
-
-        self.source_tid = 69
-        # -1 indicates that the destination TID has not been set yet.
-        self.destination_tid = -1
+        self.src_addr = ('127.0.0.1', 69)
+        self.dest_addr = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((self.source_ip, self.source_tid))
+        self.sock.bind(self.src_addr)
 
     def listen_and_respond(self):
-        self.sock.listen()
-        self.sock, (self.destination_ip, self.destination_tid) = self.sock.accept()
+        data, addr = self.sock.recvfrom(2)
+
+        received_opcode = struct.unpack("H", data)
+        self.dest_addr = addr
 
         while True:
-            received_opcode = self.sock.recv(2)
-
             if received_opcode == OPCODE_READ:
                 filename = read_string(self.sock)
                 mode = read_string(self.sock)
@@ -110,10 +125,12 @@ class TFTPServer:
                 block_number = 0
                 while block_number * BLOCK_SIZE < len(data):
                     data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
-                    send_data(self.sock, block_number, data_block)
+                    send_data(self.sock, self.dest_addr, block_number, data_block)
                     block_number += 1
 
-                send_data(self.sock, block_number, data[block_number * BLOCK_SIZE:])
+                logging.info("Sending block %d", block_number)
+                data_block = data[block_number * BLOCK_SIZE:]
+                send_data(self.sock, self.dest_addr, block_number, data_block)
 
             elif received_opcode == OPCODE_WRITE:
                 pass
@@ -121,16 +138,15 @@ class TFTPServer:
                 # ERROR: Invalid opcode
                 pass
 
+            received_opcode = read_number(self.sock)
+
 
 
 
 class TFTPClient:
-    def __init__(self, distination_ip):
-        self.source_ip = '127.0.0.1'
-        self.destination_ip = distination_ip
-
-        self.source_tid = random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER)
-        self.destination_tid = 69
+    def __init__(self, destination_ip):
+        self.src_addr = ('127.0.0.1', random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER))
+        self.dst_addr = (destination_ip, 69)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -139,8 +155,7 @@ class TFTPClient:
         if opcode != OPCODE_READ or opcode != OPCODE_WRITE:
             return 
 
-        addr = (self.destination_ip, self.destination_tid)
-        send_request(self.sock, addr, opcode, filename, mode)
+        send_request(self.sock, self.dst_addr, opcode, filename, mode)
 
         while True:
             received_opcode = self.sock.recv(2)
@@ -163,7 +178,8 @@ class TFTPClient:
                 end_of_transfer = False
                 while not end_of_transfer:
                     if received_opcode == OPCODE_DATA:
-                        block_number, data, end_of_transfer = read_data(sock)
+                        block_number, data, end_of_transfer = read_data(self.sock)
+                        logging.info("Received block_number %d", block_number)
                     else:
                         log_error(self.sock)
                         break
@@ -172,7 +188,7 @@ class TFTPClient:
                     virtual_file_block_size += 1
 
                     # look for another data packet
-                    received_opcode = self.sock.recv(2)
+                    received_opcode = read_number(self.sock)
 
                 with open(filename + ".copy", "a") as f:
                     for i in range(virtual_file_block_size):
@@ -193,7 +209,7 @@ if __name__ == "__main__":
 
     client = TFTPClient('127.0.0.1')
 
-    filename = "test.txt"
-    mode = "netascii"
+    filename = b"test.txt"
+    mode = b"netascii"
     client.request(OPCODE_READ, filename, mode)
 
