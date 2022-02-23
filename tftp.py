@@ -3,6 +3,7 @@ import random
 import socket
 
 MAX_PORT_NUMBER = 65_535
+BLOCK_SIZE = 512
 
 OPCODE_READ = 1
 OPCODE_WRITE = 2
@@ -61,6 +62,7 @@ class TFTPClient:
 
     def request(self, opcode, filename, mode):
         if opcode != OPCODE_READ or opcode != OPCODE_WRITE:
+            print("Error {}")
             pass # ERROR: invalid opcode, return!
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -87,12 +89,27 @@ class TFTPClient:
                 if received_opcode == OPCODE_ACK:
                     pass
                 else:
+                    print("Error {}")
                     pass # ERROR: invalid opcode, return!
+
             elif opcode == OPCODE_READ:
-                if received_opcode == OPCODE_DATA:
-                    pass
-                else:
-                    pass # ERROR: invalid opcode, return!
+                with open(filename + ".copy", "a") as f:
+                    end_of_transfer = False
+                    while end_of_transfer:
+                        if received_opcode == OPCODE_DATA:
+                            block_number = sock.recv(2)
+                            data = sock.recv(512)
+                            if len(data) < 512:
+                                end_of_transfer = True
+                        else:
+                            print("Error {}")
+                            pass # ERROR: invalid opcode, return!
+
+                        f.write(data)
+
+                        # look for another data packet
+                        received_opcode = sock.recv(2)
+
 
 
     pass
