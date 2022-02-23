@@ -34,7 +34,48 @@ def send_ack(socket, block_num):
 
 
 def send_error(socket, error_code, error_msg):
-    pass 
+    pass
+
+
+def read_string(socket):
+    string = b""
+    b = socket.recv(1)
+    while b != 0:
+        string += chr(b)
+        b = socket.recv(1)
+
+    return string
+
+
+def read_request(socket):
+    filename = read_string(socket)
+    mode = read_string(socket)
+
+    return (filename, mode)
+
+
+def read_data(socket):
+    block_number = socket.recv(2)
+    data = socket.recv(512)
+
+    return (block_number, data, len(data) < 512)
+
+
+def read_ack(socket):
+    block_number = socket.recv(2)
+
+    return (block_number)
+
+
+def read_error(socket):
+    error_code = socket.recv(2)
+    error_string = read_string(socket)
+
+    return (error_code, error_string)
+
+
+def print_error(socket):
+    print("Error {error_code: %d, error_string: '%s'" % read_error(sock))
 
 
 class TFTPServer:
@@ -48,7 +89,8 @@ class TFTPServer:
 
         # Create a listening UDP socket
 
-    pass
+    def listen(self):
+        pass
 
 
 class TFTPClient:
@@ -62,7 +104,6 @@ class TFTPClient:
 
     def request(self, opcode, filename, mode):
         if opcode != OPCODE_READ or opcode != OPCODE_WRITE:
-            print("Error {}")
             pass # ERROR: invalid opcode, return!
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -74,36 +115,25 @@ class TFTPClient:
             received_opcode = sock.recv(2)
 
             if received_opcode == OPCODE_ERROR:
-                error_code = sock.recv(2)
-
-                error_string = b""
-                b = sock.recv(1)
-                while b != 0:
-                    error_string += chr(b)
-                    b = sock.recv(1)
-
-                print("Error {error_code: %d, error_string: '%s'" % (error_code, error_string))
+                print_error(sock)
                 break
             
             if opcode == OPCODE_WRITE:
                 if received_opcode == OPCODE_ACK:
                     pass
                 else:
-                    print("Error {}")
-                    pass # ERROR: invalid opcode, return!
+                    print_error(sock)
+                    break
 
             elif opcode == OPCODE_READ:
                 with open(filename + ".copy", "a") as f:
                     end_of_transfer = False
-                    while end_of_transfer:
+                    while not end_of_transfer:
                         if received_opcode == OPCODE_DATA:
-                            block_number = sock.recv(2)
-                            data = sock.recv(512)
-                            if len(data) < 512:
-                                end_of_transfer = True
+                            block_number, data, end_of_transfer = read_data(sock)
                         else:
-                            print("Error {}")
-                            pass # ERROR: invalid opcode, return!
+                            print_error(sock)
+                            break
 
                         f.write(data)
 
