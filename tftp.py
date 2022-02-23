@@ -126,19 +126,22 @@ class TFTPClient:
                     break
 
             elif opcode == OPCODE_READ:
-                with open(filename + ".copy", "a") as f:
-                    end_of_transfer = False
-                    while not end_of_transfer:
-                        if received_opcode == OPCODE_DATA:
-                            block_number, data, end_of_transfer = read_data(sock)
-                        else:
-                            print_error(sock)
-                            break
+                virtual_file = {}
+                virtual_file_block_size = 0
 
-                        f.write(data)
+                end_of_transfer = False
+                while not end_of_transfer:
+                    if received_opcode == OPCODE_DATA:
+                        block_number, data, end_of_transfer = read_data(sock)
+                    else:
+                        print_error(sock)
+                        break
 
-                        # look for another data packet
-                        received_opcode = sock.recv(2)
+                    virtual_file[block_number] = data
+                    virtual_file_block_size += 1
+
+                    # look for another data packet
+                    received_opcode = sock.recv(2)
 
 
 
