@@ -2,6 +2,7 @@
 import random
 import socket
 
+MIN_PORT_NUMBER = 1_000
 MAX_PORT_NUMBER = 65_535
 BLOCK_SIZE = 512
 
@@ -56,9 +57,9 @@ def read_request(socket):
 
 def read_data(socket):
     block_number = socket.recv(2)
-    data = socket.recv(512)
+    data = socket.recv(BLOCK_SIZE)
 
-    return (block_number, data, len(data) < 512)
+    return (block_number, data, len(data) < BLOCK_SIZE)
 
 
 def read_ack(socket):
@@ -89,7 +90,7 @@ class TFTPServer:
 
         # Create a listening UDP socket
 
-    def listen(self):
+    def listen_and_respond(self):
         pass
 
 
@@ -98,31 +99,31 @@ class TFTPClient:
         self.source_ip = '127.0.0.1'
         self.destination_ip = distination_ip
 
-        self.source_tid = random.randint(0, MAX_PORT_NUMBER)
+        self.source_tid = random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER)
         self.destination_tid = 69
+
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
     def request(self, opcode, filename, mode):
         if opcode != OPCODE_READ or opcode != OPCODE_WRITE:
-            pass # ERROR: invalid opcode, return!
+            return 
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         addr = (self.destination_ip, self.destination_tid)
-
-        send_request(sock, addr, opcode, filename, mode)
+        send_request(self.sock, addr, opcode, filename, mode)
 
         while True:
-            received_opcode = sock.recv(2)
+            received_opcode = self.sock.recv(2)
 
             if received_opcode == OPCODE_ERROR:
-                print_error(sock)
+                print_error(self.sock)
                 break
             
-            if opcode == OPCODE_WRITE:
+            elif opcode == OPCODE_WRITE:
                 if received_opcode == OPCODE_ACK:
                     pass
                 else:
-                    print_error(sock)
+                    print_error(self.sock)
                     break
 
             elif opcode == OPCODE_READ:
@@ -134,18 +135,21 @@ class TFTPClient:
                     if received_opcode == OPCODE_DATA:
                         block_number, data, end_of_transfer = read_data(sock)
                     else:
-                        print_error(sock)
+                        print_error(self.sock)
                         break
 
                     virtual_file[block_number] = data
                     virtual_file_block_size += 1
 
                     # look for another data packet
-                    received_opcode = sock.recv(2)
+                    received_opcode = self.sock.recv(2)
 
+                with open(filename + ".copy", "a") as f:
+                    for i in range(virtual_file_block_size):
+                        f.write(virtual_file[i])
 
-
-    pass
+            else:
+                pass
 
 
 if __name__ == "__main__":
