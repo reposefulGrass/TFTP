@@ -1,5 +1,7 @@
 
 import random
+import logging
+import threading
 import socket
 
 MIN_PORT_NUMBER = 1_000
@@ -22,76 +24,104 @@ ERROR_FILE_ALREADY_EXISTS = 6
 ERROR_NO_SUCH_USER = 7
 
 
-def send_request(socket, addr, opcode, filename, mode):
+def send_request(sock, addr, opcode, filename, mode):
     pass
 
 
-def send_data(socket, block_num, data):
+def send_data(sock, block_num, data):
     pass
 
 
-def send_ack(socket, block_num):
+def send_ack(sock, block_num):
     pass
 
 
-def send_error(socket, error_code, error_msg):
+def send_error(sock, error_code, error_msg):
     pass
 
 
-def read_string(socket):
+def read_string(sock):
     string = b""
-    b = socket.recv(1)
+    b = sock.recv(1)
     while b != 0:
         string += chr(b)
-        b = socket.recv(1)
+        b = sock.recv(1)
 
     return string
 
 
-def read_request(socket):
-    filename = read_string(socket)
-    mode = read_string(socket)
+def read_request(sock):
+    filename = read_string(sock)
+    mode = read_string(sock)
 
     return (filename, mode)
 
 
-def read_data(socket):
-    block_number = socket.recv(2)
-    data = socket.recv(BLOCK_SIZE)
+def read_data(sock):
+    block_number = sock.recv(2)
+    data = sock.recv(BLOCK_SIZE)
 
     return (block_number, data, len(data) < BLOCK_SIZE)
 
 
-def read_ack(socket):
-    block_number = socket.recv(2)
+def read_ack(sock):
+    block_number = sock.recv(2)
 
     return (block_number)
 
 
-def read_error(socket):
-    error_code = socket.recv(2)
-    error_string = read_string(socket)
+def read_error(sock):
+    error_code = sock.recv(2)
+    error_string = read_string(sock)
 
     return (error_code, error_string)
 
 
-def print_error(socket):
-    print("Error {error_code: %d, error_string: '%s'" % read_error(sock))
+def log_error(sock):
+    logging.error("Error {error_code: %d, error_string: '%s'" % read_error(sock))
 
 
 class TFTPServer:
-    def __init__(self, distination_ip):
+    def __init__(self):
         self.source_ip = '127.0.0.1'
-        self.destination_ip = distination_ip
+        self.destination_ip = None
 
         self.source_tid = 69
         # -1 indicates that the destination TID has not been set yet.
         self.destination_tid = -1
 
-        # Create a listening UDP socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind((self.source_ip, self.source_tid))
 
     def listen_and_respond(self):
-        pass
+        self.sock.listen()
+        self.sock, (self.destination_ip, self.destination_tid) = self.sock.accept()
+
+        while True:
+            received_opcode = self.sock.recv(2)
+
+            if received_opcode == OPCODE_READ:
+                filename = read_string(self.sock)
+                mode = read_string(self.sock)
+
+                with open(filename, "r") as f:
+                    data = f.read()
+                
+                block_number = 0
+                while block_number * BLOCK_SIZE < len(data):
+                    data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
+                    send_data(self.sock, block_number, data_block)
+                    block_number += 1
+
+                send_data(self.sock, block_number, data[block_number * BLOCK_SIZE:])
+
+            elif received_opcode == OPCODE_WRITE:
+                pass
+            else:
+                # ERROR: Invalid opcode
+                pass
+
+
 
 
 class TFTPClient:
@@ -116,14 +146,14 @@ class TFTPClient:
             received_opcode = self.sock.recv(2)
 
             if received_opcode == OPCODE_ERROR:
-                print_error(self.sock)
+                log_error(self.sock)
                 break
             
             elif opcode == OPCODE_WRITE:
                 if received_opcode == OPCODE_ACK:
                     pass
                 else:
-                    print_error(self.sock)
+                    log_error(self.sock)
                     break
 
             elif opcode == OPCODE_READ:
@@ -135,7 +165,7 @@ class TFTPClient:
                     if received_opcode == OPCODE_DATA:
                         block_number, data, end_of_transfer = read_data(sock)
                     else:
-                        print_error(self.sock)
+                        log_error(self.sock)
                         break
 
                     virtual_file[block_number] = data
@@ -152,7 +182,15 @@ class TFTPClient:
                 pass
 
 
+def setup_server():
+    server = TFTPServer()
+    server.listen_and_respond()
+
+
 if __name__ == "__main__":
+    t = threading.Thread(target=setup_server)
+    t.start()
+
     client = TFTPClient('127.0.0.1')
 
     filename = "test.txt"
