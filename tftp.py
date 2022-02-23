@@ -10,6 +10,15 @@ OPCODE_DATA = 3
 OPCODE_ACK = 4
 OPCODE_ERROR = 5
 
+ERROR_NOT_DEFINED = 0
+ERROR_FILE_NOT_FOUND = 1
+ERROR_ACCESS_VIOLATION = 2
+ERROR_DISK_FULL = 3
+ERROR_ILLEGAL_OPERATION = 4
+ERROR_UNKNOWN_TRANSFER_ID = 5
+ERROR_FILE_ALREADY_EXISTS = 6
+ERROR_NO_SUCH_USER = 7
+
 
 def send_request(socket, addr, opcode, filename, mode):
     pass
@@ -63,7 +72,16 @@ class TFTPClient:
             received_opcode = sock.recv(2)
 
             if received_opcode == OPCODE_ERROR:
-                pass
+                error_code = sock.recv(2)
+
+                error_string = b""
+                b = sock.recv(1)
+                while b != 0:
+                    error_string += chr(b)
+                    b = sock.recv(1)
+
+                print("Error {error_code: %d, error_string: '%s'" % (error_code, error_string))
+                break
             
             if opcode == OPCODE_WRITE:
                 if received_opcode == OPCODE_ACK:
@@ -87,4 +105,3 @@ if __name__ == "__main__":
     mode = "netascii"
     client.request(OPCODE_READ, filename, mode)
 
-    print("Hello World")
