@@ -35,10 +35,14 @@ ERROR_FILE_ALREADY_EXISTS = 6
 ERROR_NO_SUCH_USER = 7
 
 
+""" Send a payload to the address `addr`.
+"""
 def send_packet(sock, addr, payload):
     sock.sendto(payload, addr)
 
 
+""" Construct a request payload
+"""
 def construct_request(opcode, filename, mode):
     payload = struct.pack(">H", opcode) + filename + b"\x00" + mode + b"\x00"
     logging.debug("Request Payload: %s", payload)
@@ -46,6 +50,8 @@ def construct_request(opcode, filename, mode):
     return payload
 
 
+""" Construct a data payload
+"""
 def construct_data(block_num, data):
     payload = struct.pack(">HH", OPCODE_DATA, block_num) + data.encode()
     logging.debug("Data Payload: %s", payload)
@@ -53,13 +59,16 @@ def construct_data(block_num, data):
     return payload
 
 
+""" Construct an ack payload
+"""
 def construct_ack(block_num):
     payload = struct.pack(">HH", OPCODE_ACK, block_num)
     logging.debug("Ack Payload: %s", payload)
 
     return payload
 
-
+""" Construct an error payload
+"""
 def construct_error(error_code, error_msg):
     payload = struct.pack(">HH", OPCODE_ERROR, error_code) + error_msg + b'\x00'
     logging.debug("Error Payload: %s", payload)
@@ -67,13 +76,38 @@ def construct_error(error_code, error_msg):
     return payload
 
 
-""" Read a 2-byte number """
-def read_number(buffer, bp):
-    return (struct.unpack(">H", buffer[bp:bp+2])[0], bp + 2)
+""" Read a UDP packet from the socket and partition it into (opcode, payload)
+"""
+def read_packet(sock):
+    buffer, addr = sock.recvfrom(BUFFER_SIZE)
+
+    logging.debug("buffer: %s", buffer)
+
+    opcode = read_number(buffer)
+    payload = buffer[2:]
+
+    return (opcode, payload, addr)
 
 
-def read_string(buffer, bp):
-    begin = end = bp
+""" Read a 2-byte number represented in little endian from a buffer
+"""
+def read_number(buffer):
+    return struct.unpack(">H", buffer[0:2])[0]
+
+
+""" Read a buffer as a request payload.
+"""
+def read_request(buffer):
+    filename, skip = read_string(buffer)
+    mode, _ = read_string(buffer)
+
+    return (filename, mode)
+
+
+""" Grab a zero-terminated string at the start of buffer
+"""
+def read_string(buffer):
+    begin = end = 0
     for i in range(len(buffer)):
         if buffer[end] == 0:
             break
@@ -82,35 +116,33 @@ def read_string(buffer, bp):
     return (buffer[begin:end], end+1)
 
 
-def read_request(buffer, bp):
-    logging.debug("Buffer: %s, bp = %d", buffer, bp)
-    filename, bp = read_string(buffer, bp)
-    mode, bp = read_string(buffer, bp)
-
-    return (filename, mode, bp)
-
-
-def read_data(buffer, bp):
-    block_number, bp = read_number(buffer, bp)
-    if len(buffer[bp:]) >= BLOCK_SIZE:
-        data = buffer[bp:bp + BLOCK_SIZE]
+""" Read a buffer as a data payload
+"""
+def read_data(buffer):
+    block_number = read_number(buffer)
+    if len(buffer[2:]) >= BLOCK_SIZE:
+        data = buffer[2:2 + BLOCK_SIZE]
     else:
-        data = buffer[bp:]
+        data = buffer[2:]
 
-    return (block_number, data, len(data) != BLOCK_SIZE, bp + BLOCK_SIZE)
-
-
-def read_ack(buffer, bp):
-    block_number, bp = read_number(buffer, bp)
-
-    return (block_number, bp)
+    return (block_number, data)
 
 
-def read_error(buffer, bp):
-    error_code, bp = read_number(buffer, bp)
-    error_string, bp = read_string(buffer, bp)
+""" Read a buffer as an ack payload
+"""
+def read_ack(buffer):
+    block_number = read_number(buffer)
 
-    return (error_code, error_string, bp)
+    return block_number
+
+
+""" Read a buffer as an error payload
+"""
+def read_error(buffer):
+    error_code = read_number(buffer)
+    error_string, _ = read_string(buffer)
+
+    return (error_code, error_string)
 
 
 def log_error(buffer, bp):
@@ -121,9 +153,9 @@ def log_error(buffer, bp):
 
 
 class TFTPServer:
-    def __init__(self):
+    def __init__(self, source_ip):
         logging.info("Creating TFTP server")
-        self.src_addr = ('127.0.0.1', 69)
+        self.src_addr = (source_ip, 69)
         self.dest_addr = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -131,26 +163,24 @@ class TFTPServer:
 
         self.buffer = b""
 
+
     def listen_and_respond(self):
         logging.info("Setting TFTP server to listen")
 
-        bp = 0
-        buffer, addr = self.sock.recvfrom(BUFFER_SIZE)
-        self.dest_addr = addr
-
-        (received_opcode, bp) = read_number(buffer, bp)
-
         while True:
+            received_opcode, payload, self.dest_addr = read_packet(self.sock)
+
+            logging.debug("received_opcode: %d", received_opcode)
+
             if received_opcode == OPCODE_READ:
-                filename, bp = read_string(buffer, bp)
-                mode, bp = read_string(buffer, bp)
+                filename, mode = read_request(payload)
 
                 logging.debug("filename: %s, mode: %s" % (filename, mode))
 
                 with open(filename, "r") as f:
                     data = f.read()
 
-                logging.debug("data: %s", data)
+                logging.debug("file data: %s", data)
                 
                 block_number = 0
                 while (block_number * BLOCK_SIZE) > len(data):
@@ -165,47 +195,40 @@ class TFTPServer:
 
             elif received_opcode == OPCODE_WRITE:
                 pass
+
             else:
-                # ERROR: Invalid opcode
-                pass
-
-            buffer, _ = self.sock.recvfrom(BUFFER_SIZE)
-            bp = 0
-
-            received_opcode = read_number(buffer, bp)
-
-
+                logging.error("Invalid opcode; %s", received_opcode)
+                break
 
 
 class TFTPClient:
-    def __init__(self, destination_ip):
+    def __init__(self, source_ip, destination_ip):
         logging.info("Creating TFTP client")
-        self.src_addr = ('127.0.0.1', random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER))
+        self.src_addr = (source_ip, random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER))
         self.dst_addr = (destination_ip, 69)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.connect(self.dst_addr)
+        #self.sock.connect(self.dst_addr)
+
 
     def request(self, opcode, filename, mode):
         if opcode != OPCODE_READ and opcode != OPCODE_WRITE:
-            logging.warning("Invalid opcode")
+            logging.error("Invalid opcode parameter: %s", opcode)
             return 
 
         send_packet(self.sock, self.dst_addr, construct_request(opcode, filename, mode))
+        received_opcode, payload, addr = read_packet(self.sock)
 
-        buffer = self.sock.recv(BUFFER_SIZE)
-        bp = 0
-
-        received_opcode, bp = read_number(buffer, bp)
-
-        if opcode == OPCODE_ERROR:
-            bp = log_error(buffer, bp)
+        if received_opcode == OPCODE_ERROR:
+            error_code, error_string = read_error(payload)
+            logging.info("error_code: %s, error_string: `%s`" % (error_code, error_string))
+            return
         
-        elif opcode == OPCODE_WRITE:
+        if opcode == OPCODE_WRITE:
             if received_opcode == OPCODE_ACK:
                 pass
             else:
-                bp = log_error(buffer, bp)
+                logging.error("Invalid opcode; %s", received_opcode)
 
         elif opcode == OPCODE_READ:
             virtual_file = {}
@@ -214,28 +237,28 @@ class TFTPClient:
             end_of_transfer = False
             while not end_of_transfer:
                 if received_opcode == OPCODE_DATA:
-                    block_number, data, end_of_transfer, base_prefix = read_data(buffer, bp)
+                    block_number, data = read_data(payload)
+                    if len(data) != 512:
+                        end_of_transfer = True
+
                     logging.info("Received block_number %d", block_number)
                 else:
-                    bp = log_error(buffer, bp)
+                    logging.error("Invalid opcode; %s", received_opcode)
                     break
 
                 virtual_file[block_number] = data
                 virtual_file_block_size += 1
 
                 # look for another data packet
-                received_opcode, bp = read_number(buffer, bp)
+                received_opcode = read_number(payload)
 
             with open(filename + b".copy", "wb") as f:
                 for i in range(virtual_file_block_size):
                     f.write(virtual_file[i])
 
-        else:
-            pass
-
 
 def setup_server():
-    server = TFTPServer()
+    server = TFTPServer('127.0.0.1')
     server.listen_and_respond()
 
 
@@ -244,7 +267,7 @@ if __name__ == "__main__":
     t = threading.Thread(target=setup_server)
     t.start()
 
-    client = TFTPClient('127.0.0.1')
+    client = TFTPClient('127.0.0.1', '127.0.0.1')
 
     filename = b"test.txt"
     mode = b"netascii"
