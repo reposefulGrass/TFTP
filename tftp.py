@@ -260,7 +260,7 @@ def setup_server():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, format='[%(name)-8s] [%(levelname)-8s] %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='[%(name)-8s | %(levelname)-8s] %(message)s')
     t = threading.Thread(target=setup_server)
     t.start()
 
