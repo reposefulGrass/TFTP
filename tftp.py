@@ -7,9 +7,6 @@ import socket
 import struct
 
 
-# TODO: Get rid of `bp` in read_XXX(buffer, bp). Replace with internal logic and return bytes read. 
-
-
 # ====[ CONSTANTS ]====
 
 MIN_PORT_NUMBER = 1_000
