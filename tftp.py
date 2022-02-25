@@ -6,6 +6,8 @@ import threading
 import socket
 import struct
 
+from numpy import block
+
 
 # ====[ CONSTANTS ]====
 
@@ -153,7 +155,7 @@ class TFTPServer:
     def __init__(self, source_ip):
         logging.info("Creating TFTP server")
         self.src_addr = (source_ip, 69)
-        self.dest_addr = None
+        self.dst_addr = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(self.src_addr)
@@ -165,7 +167,7 @@ class TFTPServer:
         logging.info("Setting TFTP server to listen")
 
         while True:
-            received_opcode, payload, self.dest_addr = read_packet(self.sock)
+            received_opcode, payload, self.dst_addr = read_packet(self.sock)
 
             logging.debug("received_opcode: %d", received_opcode)
 
@@ -191,7 +193,40 @@ class TFTPServer:
                 send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
 
             elif received_opcode == OPCODE_WRITE:
-                pass
+                filename, mode = read_request(payload)
+
+                logging.debug("filename: %s, mode: %s" % (filename, mode))
+
+                virtual_file = {}
+                virtual_file_size = 0
+
+                block_number = 0
+                send_packet(self.sock, self.dst_addr, construct_ack(block_number))
+
+                received_opcode, payload, self.dest_addr = read_packet(self.sock)
+                if received_opcode == OPCODE_DATA:
+                    received_block_number, data = read_data(payload)
+
+                    while len(data) == BLOCK_SIZE:
+                        virtual_file[received_block_number] = data
+                        virtual_file_size += 1
+
+                        received_opcode, payload, self.dest_addr = read_packet(self.sock)
+                        if received_opcode != OPCODE_DATA:
+                            logging.error("Incorrect opcode: %d", received_opcode)
+                        
+                        received_block_number, data = read_data(payload)
+
+                    virtual_file[received_block_number] = data
+                    virtual_file_size += 1
+
+                    with open(filename + b".copy", "wb") as f:
+                        for i in range(virtual_file_size):
+                            f.write(virtual_file[i])
+
+                else:
+                    logging.error("Incorrect opcode: %d", received_opcode)
+                    return
 
             else:
                 logging.error("Invalid opcode; %s", received_opcode)
@@ -214,7 +249,7 @@ class TFTPClient:
             return 
 
         send_packet(self.sock, self.dst_addr, construct_request(opcode, filename, mode))
-        received_opcode, payload, addr = read_packet(self.sock)
+        received_opcode, payload, _ = read_packet(self.sock)
 
         if received_opcode == OPCODE_ERROR:
             error_code, error_string = read_error(payload)
@@ -223,9 +258,50 @@ class TFTPClient:
         
         if opcode == OPCODE_WRITE:
             if received_opcode == OPCODE_ACK:
-                pass
+                block_number = read_ack(payload)
+                if block_number != 0:
+                    logging.error("Inccorect block number for ack: %d", block_number)
+                    return
             else:
                 logging.error("Invalid opcode; %s", received_opcode)
+                return
+                
+            with open(filename, "r") as f:
+                file = f.read()
+
+            block_number = 0
+            cursor = 0
+            while len(file[cursor:]) > BLOCK_SIZE:
+                send_packet(
+                    self.sock, 
+                    self.dst_addr, 
+                    construct_data(
+                        block_number, 
+                        file[cursor : cursor + BLOCK_SIZE]
+                    )
+                )
+
+                received_opcode, payload, _ = read_packet(self.sock)
+                if received_opcode != OPCODE_ACK:
+                    logging.error("Invalid opcode: %d", received_opcode)
+                    return
+
+                received_block_number = read_ack(payload)
+                if received_block_number != block_number:
+                    # duplicate packet
+                    pass
+
+                block_number += 1
+                cursor = block_number * BLOCK_SIZE
+
+            send_packet(
+                self.sock, 
+                self.dst_addr, 
+                construct_data(
+                    block_number, 
+                    file[cursor:]
+                )
+            )
 
         elif opcode == OPCODE_READ:
             virtual_file = {}
@@ -268,7 +344,7 @@ if __name__ == "__main__":
 
     filename = b"test.txt"
     mode = b"netascii"
-    client.request(OPCODE_READ, filename, mode)
+    client.request(OPCODE_WRITE, filename, mode)
 
     t.join()
 
