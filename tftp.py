@@ -159,7 +159,6 @@ class TFTPServer:
 
         self.buffer = b""
 
-
     def listen_and_respond(self):
         logging.info("Setting TFTP server to listen")
 
@@ -182,6 +181,18 @@ class TFTPServer:
                 while (block_number * BLOCK_SIZE) > len(data):
                     data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
                     send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+                    
+                    received_opcode, payload, self.dst_addr = read_packet(self.sock)
+                    if received_opcode != OPCODE_ACK:
+                        logging.error("Invalid opcode: %d", received_opcode)
+                        return
+                    
+                    received_block_num = read_ack(payload)
+                    
+                    if block_number != received_block_num:
+                        # duplicate/missing packet?
+                        pass
+                    
                     block_number += 1
 
                 logging.info("Sending block %d", block_number)
@@ -237,8 +248,6 @@ class TFTPClient:
         self.dst_addr = (destination_ip, 69)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        #self.sock.connect(self.dst_addr)
-
 
     def request(self, opcode, filename, mode):
         if opcode != OPCODE_READ and opcode != OPCODE_WRITE:
@@ -308,7 +317,7 @@ class TFTPClient:
             while not end_of_transfer:
                 if received_opcode == OPCODE_DATA:
                     block_number, data = read_data(payload)
-                    if len(data) != 512:
+                    if len(data) < 512:
                         end_of_transfer = True
 
                     logging.info("Received block_number %d", block_number)
@@ -328,17 +337,17 @@ class TFTPClient:
 
 
 def setup_server():
-    server = TFTPServer('127.0.0.1')
+    server = TFTPServer(source_ip='127.0.0.1')
     server.listen_and_respond()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='[%(name)-8s | %(levelname)-8s] %(message)s')
+
     t = threading.Thread(target=setup_server)
     t.start()
 
-    client = TFTPClient('127.0.0.1', '127.0.0.1')
-
+    client = TFTPClient(source_ip='127.0.0.1', destination_ip='127.0.0.1')
     filename = b"test.txt"
     mode = b"netascii"
     client.request(OPCODE_WRITE, filename, mode)
