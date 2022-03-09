@@ -67,7 +67,7 @@ def construct_ack(block_num: int) -> bytes:
 
 """ Construct an error payload
 """
-def construct_error(error_code: int, error_msg: str) -> bytes:
+def construct_error(error_code: int, error_msg: bytes) -> bytes:
     payload = struct.pack(">HH", OPCODE_ERROR, error_code) + error_msg + b'\x00'
     logging.debug("Error Payload: %s", payload)
 
@@ -91,6 +91,8 @@ def read_packet(sock: socket):
 """ Read a 2-byte number represented in little endian from a buffer
 """
 def read_number(buffer: str) -> bytes:
+    #logging.debug("read_number's buffer: %s", buffer)
+
     return struct.unpack(">H", buffer[0:2])[0]
 
 
@@ -132,6 +134,8 @@ def read_request(buffer: str) -> tuple[str, str]:
 #  Buffer
 #
 def read_string(buffer: str) -> tuple[str, int]:
+    #logging.debug("read_string's buffer: %s", buffer)
+
     begin = n = 0
     for i in range(len(buffer)):
         if buffer[n] == 0:
@@ -198,17 +202,12 @@ def read_ack(buffer: str) -> int:
 #  Buffer
 #
 def read_error(buffer: str) -> tuple[int, str]:
+    #logging.debug("read_error's buffer: %s", buffer)
+
     error_code = read_number(buffer)
-    error_string, _ = read_string(buffer)
+    error_string, _ = read_string(buffer[2:])
 
     return (error_code, error_string)
-
-
-def log_error(buffer: str, bp: int) -> int:
-    error_code, error_string, bp = read_error(buffer, bp)
-    logging.error("Error {error_code: %d, error_string: '%s'" % (error_code, error_string))
-
-    return bp
 
 
 class TFTPServer:
@@ -227,7 +226,6 @@ class TFTPServer:
 
         while True:
             received_opcode, payload, self.dst_addr = read_packet(self.sock)
-
             logging.debug("received_opcode: %d", received_opcode)
 
             if received_opcode == OPCODE_READ:
@@ -246,54 +244,66 @@ class TFTPServer:
                 send_packet(
                     self.sock, 
                     self.dest_addr, 
-                    construct_error(ERROR_ILLEGAL_OPERATION, "Invalid Opcode")
+                    construct_error(
+                        ERROR_ILLEGAL_OPERATION, 
+                        f"Invalid Opcode `{received_opcode}`".encode()
+                    )
                 )
 
     def handle_read_request(self, filename: str, mode: str):
-        try:
-            with open(filename, "r") as f:
-                data = f.read()
-        except FileNotFoundError:
+        p = Path(filename.decode())
+
+        if not (p.exists() and p.is_file()):
             send_packet(
                 self.sock, 
-                self.dest_addr, 
-                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.")
+                self.dst_addr, 
+                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.".encode())
             )
             return
 
+        with open(filename, "r") as f:
+            data = f.read()
+
         logging.debug("file data: %s", data)
-        
-        block_number = 0
-        while (block_number * BLOCK_SIZE) > len(data):
-            data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
-            send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+
+        # Corresponds to the block number of the data payload.
+        blocks_read = 0
+
+        # Read the request in blocks of `BLOCK_SIZE=512` bytes. 
+        while (blocks_read * BLOCK_SIZE) < len(data):
+            data_block = data[blocks_read * BLOCK_SIZE : (blocks_read+1) * BLOCK_SIZE]
+            send_packet(self.sock, self.dest_addr, construct_data(blocks_read, data_block))
             
-            received_opcode, payload, self.dst_addr = read_packet(self.sock)
+            received_opcode, payload, _ = read_packet(self.sock)
             if received_opcode != OPCODE_ACK:
-                logging.error("Invalid opcode: %d", received_opcode)
-                return
+                logging.debug("Invalid Opcode received.")
+                send_packet(
+                    self.sock, 
+                    self.dest_addr, 
+                    construct_error(ERROR_ILLEGAL_OPERATION, f"Invalid Opcode `{received_opcode}`")
+                )
+                return # TODO: read another packet till a Ack is found?
             
             received_block_num = read_ack(payload)
             
-            if block_number != received_block_num:
-                # duplicate/missing packet?
+            if blocks_read < received_block_num:
+                # TODO: How would this happen?
+                pass
+            if blocks_read > received_block_num:
+                # TODO: resend data blocks?
+                #blocks_read = received_block_num
                 pass
             
-            block_number += 1
-
-        logging.info("Sending block %d", block_number)
-
-        data_block = data[block_number * BLOCK_SIZE:]
-        send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+            blocks_read += 1
 
     def handle_write_request(self, filename: str, mode: str):
-        p = Path(filename)
+        p = Path(filename.decode())
 
-        if not p.exists() and p.is_file():
+        if not (p.exists() and p.is_file()):
             send_packet(
                 self.sock, 
-                self.dest_addr, 
-                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.")
+                self.dst_addr, 
+                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.".encode())
             )
             return
 
@@ -347,7 +357,7 @@ class TFTPClient:
 
         if received_opcode == OPCODE_ERROR:
             error_code, error_string = read_error(payload)
-            logging.info("error_code: %s, error_string: `%s`" % (error_code, error_string))
+            logging.info("error_code: %s, error_string: `%s`" % (error_code, error_string.decode()))
             return
         
         if opcode == OPCODE_WRITE:
