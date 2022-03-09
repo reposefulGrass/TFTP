@@ -33,14 +33,14 @@ ERROR_NO_SUCH_USER = 7
 
 """ Send a payload to the address `addr`.
 """
-def send_packet(sock, addr, payload):
+def send_packet(sock: socket, addr, payload: bytes):
     sock.sendto(payload, addr)
 
 
 """ Construct a request payload
 """
-def construct_request(opcode, filename, mode):
-    payload = struct.pack(">H", opcode) + filename + b"\x00" + mode + b"\x00"
+def construct_request(opcode, filename: str, mode: str) -> bytes:
+    payload = struct.pack(">H", opcode) + filename.encode() + b"\x00" + mode.encode() + b"\x00"
     logging.debug("Request Payload: %s", payload)
 
     return payload
@@ -48,7 +48,7 @@ def construct_request(opcode, filename, mode):
 
 """ Construct a data payload
 """
-def construct_data(block_num, data):
+def construct_data(block_num: int, data: str) -> bytes:
     payload = struct.pack(">HH", OPCODE_DATA, block_num) + data.encode()
     logging.debug("Data Payload: %s", payload)
 
@@ -57,7 +57,7 @@ def construct_data(block_num, data):
 
 """ Construct an ack payload
 """
-def construct_ack(block_num):
+def construct_ack(block_num: int) -> bytes:
     payload = struct.pack(">HH", OPCODE_ACK, block_num)
     logging.debug("Ack Payload: %s", payload)
 
@@ -65,7 +65,7 @@ def construct_ack(block_num):
 
 """ Construct an error payload
 """
-def construct_error(error_code, error_msg):
+def construct_error(error_code: int, error_msg: str) -> bytes:
     payload = struct.pack(">HH", OPCODE_ERROR, error_code) + error_msg + b'\x00'
     logging.debug("Error Payload: %s", payload)
 
@@ -74,7 +74,7 @@ def construct_error(error_code, error_msg):
 
 """ Read a UDP packet from the socket and partition it into (opcode, payload)
 """
-def read_packet(sock):
+def read_packet(sock: socket):
     buffer, addr = sock.recvfrom(BUFFER_SIZE)
 
     logging.debug("buffer: %s", buffer)
@@ -85,63 +85,124 @@ def read_packet(sock):
     return (opcode, payload, addr)
 
 
+# TODO: Change name to `read_2_byte_number(buffer: str)`?
 """ Read a 2-byte number represented in little endian from a buffer
 """
-def read_number(buffer):
+def read_number(buffer: str) -> bytes:
     return struct.unpack(">H", buffer[0:2])[0]
 
 
-""" Read a buffer as a request payload.
-"""
-def read_request(buffer):
-    filename, skip = read_string(buffer)
-    mode, _ = read_string(buffer)
+# Read a request payload from a buffer.
+# 
+# Request Payload FORMAT: 
+#
+#      m Bytes
+#      |
+#      |      1 Byte
+#      |      |   
+#      |      |   n Bytes
+#      |      |   |
+#      |      |   |    1 Byte
+#      |      |   |    |
+#  [Filename][0][Mode][0]
+#  ^
+#  |
+#  Buffer
+#
+def read_request(buffer: str) -> tuple[str, str]:
+    filename, m = read_string(buffer)
+    mode, _ = read_string(buffer[m + 1:])
 
     return (filename, mode)
 
 
-""" Grab a zero-terminated string at the start of buffer
-"""
-def read_string(buffer):
-    begin = end = 0
+# Grab a zero-terminated string at the start of buffer
+# 
+# String FORMAT: 
+#
+#      n Bytes
+#      |
+#      |    1 Byte
+#      |    |
+#  [String][0]
+#  ^
+#  |
+#  Buffer
+#
+def read_string(buffer: str) -> tuple[str, int]:
+    begin = n = 0
     for i in range(len(buffer)):
-        if buffer[end] == 0:
+        if buffer[n] == 0:
             break
-        end += 1
+        n += 1
 
-    return (buffer[begin:end], end+1)
+    return (buffer[begin:n], n + 1)
 
 
-""" Read a buffer as a data payload
-"""
-def read_data(buffer):
+
+# Read a data payload from a buffer.
+# 
+# Data Payload FORMAT: 
+#
+#        2 Bytes
+#        |          1-512 Bytes
+#        |          | 
+#  [Block Number][Data]
+#  ^
+#  |
+#  Buffer
+#
+def read_data(buffer: str) -> tuple[int, str]:
     block_number = read_number(buffer)
     if len(buffer[2:]) >= BLOCK_SIZE:
-        data = buffer[2:2 + BLOCK_SIZE]
+        data = buffer[2 : 2 + BLOCK_SIZE]
     else:
         data = buffer[2:]
 
     return (block_number, data)
 
 
-""" Read a buffer as an ack payload
-"""
-def read_ack(buffer):
+# Read an ack payload from a buffer.
+# 
+# Ack Payload FORMAT: 
+#
+#        2 Bytes
+#        |
+#        |
+#  [Block Number]
+#  ^
+#  |
+#  Buffer
+#
+def read_ack(buffer: str) -> int:
     block_number = read_number(buffer)
 
     return block_number
 
 
-""" Read a buffer as an error payload
-"""
-def read_error(buffer):
+# Read an error payload from a buffer.
+# 
+# Error Payload FORMAT: 
+#
+#        2 Bytes
+#        |
+#        |            n Bytes
+#        |            |
+#        |            |       1 Byte
+#        |            |       |
+#  [Error Code][Error String][0]
+#  ^
+#  |
+#  Buffer
+#
+def read_error(buffer: str) -> tuple[int, str]:
     error_code = read_number(buffer)
     error_string, _ = read_string(buffer)
 
     return (error_code, error_string)
 
 
-def log_error(buffer, bp):
+def log_error(buffer: str, bp: int) -> int:
     error_code, error_string, bp = read_error(buffer, bp)
     logging.error("Error {error_code: %d, error_string: '%s'" % (error_code, error_string))
 
@@ -149,7 +210,7 @@ def log_error(buffer, bp):
 
 
 class TFTPServer:
-    def __init__(self, source_ip):
+    def __init__(self, source_ip: str):
         logging.info("Creating TFTP server")
         self.src_addr = (source_ip, 69)
         self.dst_addr = None
@@ -169,80 +230,87 @@ class TFTPServer:
 
             if received_opcode == OPCODE_READ:
                 filename, mode = read_request(payload)
-
                 logging.debug("filename: %s, mode: %s" % (filename, mode))
 
-                with open(filename, "r") as f:
-                    data = f.read()
-
-                logging.debug("file data: %s", data)
-                
-                block_number = 0
-                while (block_number * BLOCK_SIZE) > len(data):
-                    data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
-                    send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
-                    
-                    received_opcode, payload, self.dst_addr = read_packet(self.sock)
-                    if received_opcode != OPCODE_ACK:
-                        logging.error("Invalid opcode: %d", received_opcode)
-                        return
-                    
-                    received_block_num = read_ack(payload)
-                    
-                    if block_number != received_block_num:
-                        # duplicate/missing packet?
-                        pass
-                    
-                    block_number += 1
-
-                logging.info("Sending block %d", block_number)
-
-                data_block = data[block_number * BLOCK_SIZE:]
-                send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+                self.handle_read_request(filename, mode)
 
             elif received_opcode == OPCODE_WRITE:
                 filename, mode = read_request(payload)
-
                 logging.debug("filename: %s, mode: %s" % (filename, mode))
 
-                virtual_file = {}
-                virtual_file_size = 0
-
-                block_number = 0
-                send_packet(self.sock, self.dst_addr, construct_ack(block_number))
-
-                received_opcode, payload, self.dest_addr = read_packet(self.sock)
-                if received_opcode == OPCODE_DATA:
-                    received_block_number, data = read_data(payload)
-
-                    while len(data) == BLOCK_SIZE:
-                        virtual_file[received_block_number] = data
-                        virtual_file_size += 1
-
-                        received_opcode, payload, self.dest_addr = read_packet(self.sock)
-                        if received_opcode != OPCODE_DATA:
-                            logging.error("Incorrect opcode: %d", received_opcode)
-                        
-                        received_block_number, data = read_data(payload)
-
-                    virtual_file[received_block_number] = data
-                    virtual_file_size += 1
-
-                    with open(filename + b".copy", "wb") as f:
-                        for i in range(virtual_file_size):
-                            f.write(virtual_file[i])
-
-                else:
-                    logging.error("Incorrect opcode: %d", received_opcode)
-                    return
+                self.handle_write_request(filename, mode)
 
             else:
-                logging.error("Invalid opcode; %s", received_opcode)
-                break
+                send_packet(
+                    self.sock, 
+                    self.dest_addr, 
+                    construct_error(ERROR_ILLEGAL_OPERATION, "Invalid Opcode")
+                )
+
+    def handle_read_request(self, filename: str, mode: str):
+        with open(filename, "r") as f:
+            data = f.read()
+
+        logging.debug("file data: %s", data)
+        
+        block_number = 0
+        while (block_number * BLOCK_SIZE) > len(data):
+            data_block = data[block_number * BLOCK_SIZE: (block_number+1) * BLOCK_SIZE]
+            send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+            
+            received_opcode, payload, self.dst_addr = read_packet(self.sock)
+            if received_opcode != OPCODE_ACK:
+                logging.error("Invalid opcode: %d", received_opcode)
+                return
+            
+            received_block_num = read_ack(payload)
+            
+            if block_number != received_block_num:
+                # duplicate/missing packet?
+                pass
+            
+            block_number += 1
+
+        logging.info("Sending block %d", block_number)
+
+        data_block = data[block_number * BLOCK_SIZE:]
+        send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
+
+    def handle_write_request(self, filename: str, mode: str):
+        virtual_file = {}
+        virtual_file_size = 0
+
+        block_number = 0
+        send_packet(self.sock, self.dst_addr, construct_ack(block_number))
+
+        received_opcode, payload, self.dest_addr = read_packet(self.sock)
+        if received_opcode == OPCODE_DATA:
+            received_block_number, data = read_data(payload)
+
+            while len(data) == BLOCK_SIZE:
+                virtual_file[received_block_number] = data
+                virtual_file_size += 1
+
+                received_opcode, payload, self.dest_addr = read_packet(self.sock)
+                if received_opcode != OPCODE_DATA:
+                    logging.error("Incorrect opcode: %d", received_opcode)
+                
+                received_block_number, data = read_data(payload)
+
+            virtual_file[received_block_number] = data
+            virtual_file_size += 1
+
+            with open(filename + b".copy", "wb") as f:
+                for i in range(virtual_file_size):
+                    f.write(virtual_file[i])
+
+        else:
+            logging.error("Incorrect opcode: %d", received_opcode)
+            return
 
 
 class TFTPClient:
-    def __init__(self, source_ip, destination_ip):
+    def __init__(self, source_ip: str, destination_ip: str):
         logging.info("Creating TFTP client")
         self.src_addr = (source_ip, random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER))
         self.dst_addr = (destination_ip, 69)
@@ -336,6 +404,7 @@ class TFTPClient:
                     f.write(virtual_file[i])
 
 
+# NOTE: Temporary. A TFTPServer should be created on another process (better design).
 def setup_server():
     server = TFTPServer(source_ip='127.0.0.1')
     server.listen_and_respond()
@@ -348,8 +417,8 @@ if __name__ == "__main__":
     t.start()
 
     client = TFTPClient(source_ip='127.0.0.1', destination_ip='127.0.0.1')
-    filename = b"test.txt"
-    mode = b"netascii"
+    filename = "test.txt"
+    mode = "netascii"
     client.request(OPCODE_WRITE, filename, mode)
 
     t.join()
