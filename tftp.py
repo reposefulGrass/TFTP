@@ -5,6 +5,8 @@ import threading
 import socket
 import struct
 
+from pathlib import Path
+
 
 # ====[ CONSTANTS ]====
 
@@ -248,8 +250,16 @@ class TFTPServer:
                 )
 
     def handle_read_request(self, filename: str, mode: str):
-        with open(filename, "r") as f:
-            data = f.read()
+        try:
+            with open(filename, "r") as f:
+                data = f.read()
+        except FileNotFoundError:
+            send_packet(
+                self.sock, 
+                self.dest_addr, 
+                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.")
+            )
+            return
 
         logging.debug("file data: %s", data)
         
@@ -277,6 +287,16 @@ class TFTPServer:
         send_packet(self.sock, self.dest_addr, construct_data(block_number, data_block))
 
     def handle_write_request(self, filename: str, mode: str):
+        p = Path(filename)
+
+        if not p.exists() and p.is_file():
+            send_packet(
+                self.sock, 
+                self.dest_addr, 
+                construct_error(ERROR_FILE_NOT_FOUND, f"File `{filename}` not found.")
+            )
+            return
+
         virtual_file = {}
         virtual_file_size = 0
 
