@@ -41,14 +41,27 @@ ERROR_NO_SUCH_USER = 7
 # i.e. 'read_request()` reads a request payload from the buffer.
 
 
-""" Send a payload to the address `addr`.
-"""
+# Send a UDP payload to the address `addr` on the socket `sock`. 
+#
+# This payload should be a tftp packet which is formated as: (opcode | tftp_payload)
+#
 def send_packet(sock: socket, addr: tuple[str, int], payload: bytes):
     sock.sendto(payload, addr)
 
 
-""" Read a UDP packet from the socket and partition it into (opcode, payload)
-"""
+# Read a buffer from the socket and partition it into (opcode | tftp_payload).
+# 
+# TFTP packet FORMAT: 
+#
+#      2 Bytes
+#      |
+#      |
+#      |
+#  [Opcode][Payload]
+#  ^
+#  |
+#  Buffer
+#
 def read_packet(sock: socket) -> tuple[int, bytes, tuple[str, int]]:
     buffer, addr = sock.recvfrom(BUFFER_SIZE)
 
@@ -61,8 +74,20 @@ def read_packet(sock: socket) -> tuple[int, bytes, tuple[str, int]]:
 
 
 # TODO: Change name to `read_2_byte_number(buffer: str)`?
-""" Read a 2-byte number represented in little endian from a buffer
-"""
+#
+# Grab a 2-byte little-endian number from the buffer.
+# 
+# Number FORMAT: 
+#
+#      2 Bytes
+#      |
+#      |
+#      |
+#  [Number]
+#  ^
+#  |
+#  Buffer
+#
 def read_number(buffer: str) -> bytes:
     #logging.debug("read_number's buffer: %s", buffer)
 
@@ -124,7 +149,7 @@ def read_request(buffer: str) -> tuple[str, str]:
     return (filename, mode)
 
 
-# Read a data payload from a buffer.
+# Construct/Read a data payload from a buffer.
 # 
 # Data Payload FORMAT: 
 #
@@ -152,7 +177,7 @@ def read_data(buffer: str) -> tuple[int, str]:
     return (block_number, data)
 
 
-# Read an ack payload from a buffer.
+# Construct/Read an ack payload from a buffer.
 # 
 # Ack Payload FORMAT: 
 #
@@ -176,7 +201,7 @@ def read_ack(buffer: str) -> int:
     return block_number
 
 
-# Read an error payload from a buffer.
+# Construct/Read an error payload from a buffer.
 # 
 # Error Payload FORMAT: 
 #
