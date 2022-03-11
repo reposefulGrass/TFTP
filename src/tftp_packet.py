@@ -29,6 +29,18 @@ ERROR_FILE_ALREADY_EXISTS = 6
 ERROR_NO_SUCH_USER = 7
 
 
+# There are two main types of functions within this file: 
+#
+#   1. construct_XXX()
+#   2. read_XXX()
+#
+# The `construct_XXX()` functions construct the payload of a XXX-type packet.
+# i.e. `construct_request()` constructs a payload for a request packet.
+#
+# The `read_XXX()` functions read the payload of a XXX-type packet from a buffer.
+# i.e. 'read_request()` reads a request payload from the buffer.
+
+
 """ Send a payload to the address `addr`.
 """
 def send_packet(sock: socket, addr: tuple[str, int], payload: bytes):
