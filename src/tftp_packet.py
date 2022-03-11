@@ -31,7 +31,7 @@ ERROR_NO_SUCH_USER = 7
 
 """ Send a payload to the address `addr`.
 """
-def send_packet(sock: socket, addr, payload: bytes):
+def send_packet(sock: socket, addr: tuple[str, int], payload: bytes):
     sock.sendto(payload, addr)
 
 
@@ -72,7 +72,7 @@ def construct_error(error_code: int, error_msg: bytes) -> bytes:
 
 """ Read a UDP packet from the socket and partition it into (opcode, payload)
 """
-def read_packet(sock: socket):
+def read_packet(sock: socket) -> tuple[int, bytes, tuple[str, int]]:
     buffer, addr = sock.recvfrom(BUFFER_SIZE)
 
     logging.debug("buffer: %s", buffer)

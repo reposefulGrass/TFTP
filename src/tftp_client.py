@@ -17,7 +17,7 @@ class TFTPClient:
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    def request(self, opcode, filename, mode):
+    def request(self, opcode: int, filename: str, mode: str):
         if opcode != OPCODE_READ and opcode != OPCODE_WRITE:
             logging.error("Invalid opcode parameter: %s", opcode)
             return 
