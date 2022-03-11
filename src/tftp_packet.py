@@ -29,7 +29,7 @@ ERROR_FILE_ALREADY_EXISTS = 6
 ERROR_NO_SUCH_USER = 7
 
 
-# There are two main types of functions within this file: 
+# There are two main types of functions within this file (except a few): 
 #
 #   1. construct_XXX()
 #   2. read_XXX()
@@ -45,41 +45,6 @@ ERROR_NO_SUCH_USER = 7
 """
 def send_packet(sock: socket, addr: tuple[str, int], payload: bytes):
     sock.sendto(payload, addr)
-
-
-""" Construct a request payload
-"""
-def construct_request(opcode, filename: str, mode: str) -> bytes:
-    payload = struct.pack(">H", opcode) + filename.encode() + b"\x00" + mode.encode() + b"\x00"
-    logging.debug("Request Payload: %s", payload)
-
-    return payload
-
-
-""" Construct a data payload
-"""
-def construct_data(block_num: int, data: str) -> bytes:
-    payload = struct.pack(">HH", OPCODE_DATA, block_num) + data.encode()
-    logging.debug("Data Payload: %s", payload)
-
-    return payload
-
-
-""" Construct an ack payload
-"""
-def construct_ack(block_num: int) -> bytes:
-    payload = struct.pack(">HH", OPCODE_ACK, block_num)
-    logging.debug("Ack Payload: %s", payload)
-
-    return payload
-
-""" Construct an error payload
-"""
-def construct_error(error_code: int, error_msg: bytes) -> bytes:
-    payload = struct.pack(">HH", OPCODE_ERROR, error_code) + error_msg + b'\x00'
-    logging.debug("Error Payload: %s", payload)
-
-    return payload
 
 
 """ Read a UDP packet from the socket and partition it into (opcode, payload)
@@ -102,30 +67,6 @@ def read_number(buffer: str) -> bytes:
     #logging.debug("read_number's buffer: %s", buffer)
 
     return struct.unpack(">H", buffer[0:2])[0]
-
-
-# Read a request payload from a buffer.
-# 
-# Request Payload FORMAT: 
-#
-#      m Bytes
-#      |
-#      |      1 Byte
-#      |      |   
-#      |      |   n Bytes
-#      |      |   |
-#      |      |   |    1 Byte
-#      |      |   |    |
-#  [Filename][0][Mode][0]
-#  ^
-#  |
-#  Buffer
-#
-def read_request(buffer: str) -> tuple[str, str]:
-    filename, m = read_string(buffer)
-    mode, n = read_string(buffer[m:])
-
-    return (filename, mode)
 
 
 # Grab a zero-terminated string at the start of buffer
@@ -153,6 +94,35 @@ def read_string(buffer: str) -> tuple[str, int]:
     return (buffer[begin:n], n + 1)
 
 
+# Construct/Read a request payload from a buffer.
+# 
+# Request Payload FORMAT: 
+#
+#      m Bytes
+#      |
+#      |      1 Byte
+#      |      |   
+#      |      |   n Bytes
+#      |      |   |
+#      |      |   |    1 Byte
+#      |      |   |    |
+#  [Filename][0][Mode][0]
+#  ^
+#  |
+#  Buffer
+#
+def construct_request(opcode, filename: str, mode: str) -> bytes:
+    payload = struct.pack(">H", opcode) + filename.encode() + b"\x00" + mode.encode() + b"\x00"
+    logging.debug("Request Payload: %s", payload)
+
+    return payload
+
+def read_request(buffer: str) -> tuple[str, str]:
+    filename, m = read_string(buffer)
+    mode, n = read_string(buffer[m:])
+
+    return (filename, mode)
+
 
 # Read a data payload from a buffer.
 # 
@@ -166,6 +136,12 @@ def read_string(buffer: str) -> tuple[str, int]:
 #  |
 #  Buffer
 #
+def construct_data(block_num: int, data: str) -> bytes:
+    payload = struct.pack(">HH", OPCODE_DATA, block_num) + data.encode()
+    logging.debug("Data Payload: %s", payload)
+
+    return payload
+
 def read_data(buffer: str) -> tuple[int, str]:
     block_number = read_number(buffer)
     if len(buffer[2:]) >= BLOCK_SIZE:
@@ -188,6 +164,12 @@ def read_data(buffer: str) -> tuple[int, str]:
 #  |
 #  Buffer
 #
+def construct_ack(block_num: int) -> bytes:
+    payload = struct.pack(">HH", OPCODE_ACK, block_num)
+    logging.debug("Ack Payload: %s", payload)
+
+    return payload
+
 def read_ack(buffer: str) -> int:
     block_number = read_number(buffer)
 
@@ -209,6 +191,12 @@ def read_ack(buffer: str) -> int:
 #  |
 #  Buffer
 #
+def construct_error(error_code: int, error_msg: bytes) -> bytes:
+    payload = struct.pack(">HH", OPCODE_ERROR, error_code) + error_msg + b'\x00'
+    logging.debug("Error Payload: %s", payload)
+
+    return payload
+
 def read_error(buffer: str) -> tuple[int, str]:
     #logging.debug("read_error's buffer: %s", buffer)
 
