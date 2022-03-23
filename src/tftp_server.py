@@ -27,13 +27,13 @@ class TFTPServer:
                 filename, mode = read_request(payload)
                 logging.debug("filename: %s, mode: %s" % (filename, mode))
 
-                self.handle_read_request(filename, mode)
+                self.handle_read_request(filename.decode(), mode)
 
             elif received_opcode == OPCODE_WRITE:
                 filename, mode = read_request(payload)
                 logging.debug("filename: %s, mode: %s" % (filename, mode))
 
-                self.handle_write_request(filename, mode)
+                self.handle_write_request(filename.decode(), mode)
 
             else:
                 send_packet(
@@ -46,7 +46,7 @@ class TFTPServer:
                 )
 
     def handle_read_request(self, filename: str, mode: str):
-        p = Path(filename.decode())
+        p = Path(filename)
         if not (p.exists() and p.is_file()):
             send_packet(
                 self.sock, 
@@ -58,7 +58,7 @@ class TFTPServer:
         with open(filename, "r") as f:
             data = f.read()
 
-        logging.debug("file data: %s", data)
+        #logging.debug("file data: %s", data)
 
         # Corresponds to the block number of the data payload.
         blocks_read = 0
@@ -69,6 +69,7 @@ class TFTPServer:
             send_packet(self.sock, self.dst_addr, construct_data(blocks_read, data_block))
             
             received_opcode, payload, _ = read_packet(self.sock)
+            logging.debug(f"received_opcode: {received_opcode}")
             if received_opcode != OPCODE_ACK:
                 logging.debug("Invalid Opcode received.")
                 send_packet(
@@ -76,9 +77,10 @@ class TFTPServer:
                     self.dst_addr, 
                     construct_error(ERROR_ILLEGAL_OPERATION, f"Invalid Opcode `{received_opcode}`".encode())
                 )
-                return # TODO: read another packet till a Ack is found?
+                return
             
             received_block_num = read_ack(payload)
+            logging.debug(f"received_block_num: {received_block_num}")
             
             if blocks_read < received_block_num:
                 # TODO: How would this happen?

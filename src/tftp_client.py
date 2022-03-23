@@ -95,12 +95,13 @@ class TFTPClient:
                 logging.info("Received block_number %d", block_number)
 
                 # This tells us if the last data packet has been received. 
-                if len(data) < 512:
+                if len(data) < BLOCK_SIZE:
                     end_of_transfer = True
 
                 send_packet(self.sock, self.dst_addr, construct_ack(block_number))
 
             else:
+                logging.debug(f"Invalid opcode {received_opcode}")
                 send_packet(
                     self.sock, 
                     self.dst_addr, 
@@ -111,8 +112,8 @@ class TFTPClient:
             virtual_file[block_number] = data
             virtual_file_block_size += 1
 
-            # look for another data packet
-            received_opcode = read_number(payload)
+            if not end_of_transfer:
+                received_opcode, payload, _ = read_packet(self.sock)
 
         with open(filename + ".copy", "wb") as f:
             for i in range(virtual_file_block_size):

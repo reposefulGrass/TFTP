@@ -65,9 +65,10 @@ def send_packet(sock: socket, addr: tuple[str, int], payload: bytes):
 def read_packet(sock: socket) -> tuple[int, bytes, tuple[str, int]]:
     buffer, addr = sock.recvfrom(BUFFER_SIZE)
 
-    logging.debug("buffer: %s", buffer)
+    #logging.debug("buffer: %s", buffer)
 
     opcode = read_number(buffer)
+
     payload = buffer[2:]
 
     return (opcode, payload, addr)
@@ -163,7 +164,7 @@ def read_request(buffer: str) -> tuple[str, str]:
 #
 def construct_data(block_num: int, data: str) -> bytes:
     payload = struct.pack(">HH", OPCODE_DATA, block_num) + data.encode()
-    logging.debug("Data Payload: %s", payload)
+    #logging.debug("Data Payload: %s", payload)
 
     return payload
 
@@ -228,5 +229,5 @@ def read_error(buffer: str) -> tuple[int, str]:
     error_code = read_number(buffer)
     error_string, n = read_string(buffer[2:])
 
-    return (error_code, error_string)
+    return (error_code, error_string.decode())
 

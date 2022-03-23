@@ -19,7 +19,7 @@ if __name__ == "__main__":
     t.start()
 
     client = TFTPClient(source_ip='127.0.0.1', destination_ip='127.0.0.1')
-    filename = "test_multiple_blocks.txt"
+    filename = "tests/test_multiple_blocks.txt"
     mode = "netascii"
     client.request(OPCODE_READ, filename, mode)
 
