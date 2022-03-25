@@ -1,4 +1,5 @@
 
+import sys
 import logging
 import socket
 from pathlib import Path    # used by handle_read_request for seeing if a file exists
@@ -6,8 +7,9 @@ from pathlib import Path    # used by handle_read_request for seeing if a file e
 from tftp_packet import *
 
 class TFTPServer:
-    def __init__(self, source_ip: str):
+    def __init__(self, cwd: str, source_ip: str):
         logging.info("Creating TFTP server")
+        self.cwd = cwd
         self.src_addr = (source_ip, 69)
         self.dst_addr = None
 
@@ -46,8 +48,8 @@ class TFTPServer:
                 )
 
     def handle_read_request(self, filename: str, mode: str):
-        p = Path(filename)
-        if not (p.exists() and p.is_file()):
+        path = Path(self.cwd) / Path(filename).name
+        if not (path.exists() and path.is_file()):
             send_packet(
                 self.sock, 
                 self.dst_addr, 
@@ -55,7 +57,7 @@ class TFTPServer:
             )
             return
 
-        with open(filename, "r") as f:
+        with open(path, "r") as f:
             data = f.read()
 
         #logging.debug("file data: %s", data)
@@ -93,7 +95,7 @@ class TFTPServer:
             blocks_read += 1
 
     def handle_write_request(self, filename: str, mode: str):
-        p = Path(filename.decode())
+        p = Path(self.cwd) / Path(filename).name
         if not (p.exists() and p.is_file()):
             send_packet(
                 self.sock, 
@@ -129,10 +131,13 @@ class TFTPServer:
 
             virtual_file[received_block_number] = data
             virtual_file_size += 1
+ 
+            p = Path(filename)
+            filename = self.cwd + p.name
+            if p.exists():
+                filename += ".copy"
 
-            # NOTE: The `.copy` extension is temporary because the TFTPServer
-            # and TFTPClient are in the same directory. 
-            with open(filename + b".copy", "wb") as f:
+            with open(filename, "wb") as f:
                 for i in range(virtual_file_size):
                     f.write(virtual_file[i])
 
@@ -140,3 +145,11 @@ class TFTPServer:
             logging.error("Incorrect opcode: %d", received_opcode)
             return
 
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: ./tftp_server.py <working directory>")
+        sys.exit(1)
+
+    server = TFTPServer(cwd=sys.argv[1], source_ip='127.0.0.1')
+    server.listen_and_respond()

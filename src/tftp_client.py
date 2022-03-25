@@ -2,13 +2,15 @@
 import logging
 import random               # used to generated a random port number for TFTPClient
 import socket
+from pathlib import Path
 
 from tftp_packet import *
 
 
 class TFTPClient:
-    def __init__(self, source_ip: str, destination_ip: str):
+    def __init__(self, cwd: str, source_ip: str, destination_ip: str):
         logging.info("Creating TFTP client")
+        self.cwd = cwd
         self.src_addr = (
             source_ip, 
             random.randint(MIN_PORT_NUMBER, MAX_PORT_NUMBER)
@@ -115,7 +117,12 @@ class TFTPClient:
             if not end_of_transfer:
                 received_opcode, payload, _ = read_packet(self.sock)
 
-        with open(filename + ".copy", "wb") as f:
+        p = Path(filename)
+        filename = self.cwd + p.name
+        if p.exists():
+            filename += ".copy"
+
+        with open(filename, "wb") as f:
             for i in range(virtual_file_block_size):
                 f.write(virtual_file[i])
 
